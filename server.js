@@ -17,20 +17,57 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// Database Connection
-const connectDB = async () => {
-    try {
-        if (!process.env.MONGODB_URI || process.env.MONGODB_URI.includes('<password>')) {
-            console.warn('⚠️  MONGODB_URI is not set or is invalid in .env file.');
-            return;
-        }
-        await mongoose.connect(process.env.MONGODB_URI);
-        console.log('✅ MongoDB connected');
-    } catch (err) {
-        console.error('❌ MongoDB connection error:', err);
-        process.exit(1);
+// Database Connection (Serverless Pattern)
+let cached = global.mongoose;
+
+if (!cached) {
+    cached = global.mongoose = { conn: null, promise: null };
+}
+
+async function connectDB() {
+    if (cached.conn) {
+        return cached.conn;
     }
-};
+
+    if (!cached.promise) {
+        const opts = {
+            bufferCommands: false,
+        };
+
+        // Check if URI is present
+        if (!process.env.MONGODB_URI) {
+            throw new Error('MONGODB_URI is not defined');
+        }
+
+        cached.promise = mongoose.connect(process.env.MONGODB_URI, opts).then((mongoose) => {
+            console.log('✅ New MongoDB connection established');
+            return mongoose;
+        });
+    }
+
+    try {
+        cached.conn = await cached.promise;
+    } catch (e) {
+        cached.promise = null;
+        throw e;
+    }
+
+    return cached.conn;
+}
+
+// Middleware to ensure DB connection on every request
+app.use(async (req, res, next) => {
+    // Skip for static files if you want, but Express static handles that before this if placed after
+    // Actually we placed static before this? No, static is defined above.
+    // Let's just ensure DB is ready.
+    try {
+        await connectDB();
+        next();
+    } catch (error) {
+        console.error('❌ Database connection failure:', error);
+        res.status(500).json({ error: 'Database Not Available' });
+    }
+});
 
 // Helper for Deterministic Time
 const getNow = (req) => {

@@ -20,7 +20,13 @@ document.getElementById('pasteForm').addEventListener('submit', async (e) => {
         });
 
         if (!response.ok) {
-            alert('Failed to create paste');
+            let errorMsg = 'Failed to create paste';
+            try {
+                const errData = await response.json();
+                if (errData.error) errorMsg += ': ' + errData.error;
+            } catch (e) { /* ignore JSON parse error */ }
+
+            alert(errorMsg);
             return;
         }
 
